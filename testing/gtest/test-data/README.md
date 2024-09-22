@@ -9,12 +9,13 @@ See the `Protoscope` installation instructions located at the reference below.
 Command:
 
 ```bash
+# Generate a .binpb from a .txtpb
 protoscope -s <test-file.txtpb> > <test-file.binpb>
 ```
 
-Example text based format:
+Example text based format (.txtpb):
 
-```bash
+```txt
 field_num: value
 1: 150
 ```

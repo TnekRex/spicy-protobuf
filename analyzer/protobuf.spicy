@@ -18,14 +18,31 @@ type WireType = enum {
     VARINT = 0x00,
     I64    = 0x01,
     LEN    = 0x02,
-    SGROUP = 0x03, # deprecated
-    EGROUP = 0x04, # deprecated
+    SGROUP = 0x03, # deprecated, but remains in the wire format.
+    EGROUP = 0x04, # deprecated, but remains in the wire format.
     I32    = 0x05
 };
+
+const UNSET_GROUP: int32 = -1;
+global g_current_group: int32 = UNSET_GROUP;
 
 type TagAndValue = unit {
     tag:   Tag;
     value: Value(self.tag);
+
+    var group: int32 &optional;
+
+    on %done {
+        if (self.value.sgroup) {
+            g_current_group = int32(self.tag.field_num);
+        }
+        if (g_current_group != UNSET_GROUP) {
+            self.group = g_current_group;
+        }
+        if (self.value.egroup) {
+            g_current_group = UNSET_GROUP;
+        }
+    }
 };
 
 # tag := (field << 3) | wire_type
@@ -63,10 +80,13 @@ type Value = unit(tag: Tag) {
         WireType::I32    -> i32    : I32;
         WireType::I64    -> i64    : I64;
         WireType::LEN    -> unimpl : bytes &eod;
-        WireType::SGROUP -> unimpl : bytes &eod;
-        WireType::EGROUP -> unimpl : bytes &eod;
+        WireType::SGROUP ->        : void { self.sgroup = True; } # Group fields are just a tag with no payload.
+        WireType::EGROUP ->        : void { self.egroup = True; } # Group fields are just a tag with no payload.
         # TODO - Finish switch for other types
     };
+
+    var sgroup: bool = False;
+    var egroup: bool = False;
 };
 
 function parse_varint(buf: vector<uint8>) : uint64 {

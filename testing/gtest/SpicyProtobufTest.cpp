@@ -17,6 +17,7 @@
 #include <test-data/varint/protobuf_neg_150.h>
 #include <test-data/varint/protobuf_neg_2.h>
 #include <test-data/varint/protobuf_zigzag_150.h>
+#include <test-data/groups/protobuf_groups.h>
 
 namespace { // anonymous namespace
 
@@ -29,7 +30,15 @@ protected:
   static auto SetUpTestSuite() -> void;
   static auto TearDownTestSuite() -> void;
 
-  static auto parseMessage(const char* data, uint64_t size) -> ValueReference<Message>;
+  // Flags to pass to the parseMessage function.
+  // All values should be powers of 2.
+  enum ParseFlag {
+    NONE         = 0,
+    CHECK_GROUPS = 1, // Check that sgroup and egroup are false
+  };
+
+  static auto parseFlagIsSet(uint32_t flags, ParseFlag flag_to_check) -> bool;
+  static auto parseMessage(const char* data, uint64_t size, uint32_t flags = ParseFlag::CHECK_GROUPS) -> ValueReference<Message>;
 };
 
 auto SpicyProtobufTest::SetUpTestSuite() -> void {
@@ -44,7 +53,11 @@ auto SpicyProtobufTest::TearDownTestSuite() -> void {
   ::hilti::rt::done();
 }
 
-auto SpicyProtobufTest::parseMessage(const char* p_data, uint64_t const size) -> ValueReference<Message> {
+auto SpicyProtobufTest::parseFlagIsSet(uint32_t const flags, ParseFlag const flag_to_check) -> bool {
+  return (flags & flag_to_check) > 0;
+}
+
+auto SpicyProtobufTest::parseMessage(const char* p_data, uint64_t const size, uint32_t const flags) -> ValueReference<Message> {
   using namespace ::hilti::rt::reference;
   using ::hilti::rt::Stream;
 
@@ -52,6 +65,12 @@ auto SpicyProtobufTest::parseMessage(const char* p_data, uint64_t const size) ->
   p_input_stream->freeze();
   auto p_msg = make_value<Message>();
   ::hlt::protobuf::Message::parse2(p_msg, p_input_stream, {}, {});
+  if (parseFlagIsSet(flags, ParseFlag::CHECK_GROUPS)) {
+    for (auto const &tag_and_val: *p_msg->message) {
+      EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+      EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    }
+  }
   return p_msg;
 }
 
@@ -838,6 +857,90 @@ TEST_F(SpicyProtobufTest, TestI64) {
     EXPECT_DOUBLE_EQ(tag_and_val.value.value()->i64.value()->as_double, 3.14159274101257324);
   }
 
+}
+
+TEST_F(SpicyProtobufTest, TestGroups) {
+  using namespace __hlt::protobuf;
+
+  // protobuf_groups
+  auto p_data = parseMessage(reinterpret_cast<const char *>(groups_protobuf_groups_binpb), groups_protobuf_groups_binpb_len, ParseFlag::NONE);
+  auto p_msg = p_data->message;
+  ASSERT_EQ(p_msg->size(), 6);
+
+  { // Field 1
+    auto tag_and_val = p_data->message->at(0);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, 1);
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::VARINT);
+    EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+    EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    ASSERT_FALSE(tag_and_val.value.value()->varint->isNull());
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_unsigned, 1);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_zigzag, -1);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment64, 1);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment32, 1);
+    EXPECT_FALSE(tag_and_val.group.has_value());
+  }
+
+  int32_t group_num = -1;
+  { // Field 2, SGROUP
+    auto tag_and_val = p_data->message->at(1);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, 2);
+    group_num = tag_and_val.tag.value()->field_num;
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::SGROUP);
+    EXPECT_TRUE(tag_and_val.value.value()->sgroup);
+    EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    EXPECT_EQ(tag_and_val.group, group_num);
+  }
+
+  { // Field 3
+    auto tag_and_val = p_data->message->at(2);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, 3);
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::VARINT);
+    EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+    EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    ASSERT_FALSE(tag_and_val.value.value()->varint->isNull());
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_unsigned, 2);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_zigzag, 1);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment64, 2);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment32, 2);
+    EXPECT_EQ(tag_and_val.group, group_num);
+  }
+
+  { // Field 4
+    auto tag_and_val = p_data->message->at(3);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, 4);
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::I32);
+    EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+    EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    ASSERT_FALSE(tag_and_val.value.value()->i32->isNull());
+    EXPECT_EQ(tag_and_val.value.value()->i32.value()->as_unsigned, 1078530011);
+    EXPECT_EQ(tag_and_val.value.value()->i32.value()->as_twos_compliment, 1078530011);
+    EXPECT_FLOAT_EQ(tag_and_val.value.value()->i32.value()->as_float, 3.1415927);
+    EXPECT_EQ(tag_and_val.group, group_num);
+  }
+
+  { // Field 2, EGROUP
+    auto tag_and_val = p_data->message->at(4);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, group_num);
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::EGROUP);
+    EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+    EXPECT_TRUE(tag_and_val.value.value()->egroup);
+    EXPECT_EQ(tag_and_val.group, group_num);
+  }
+
+  { // Field 5
+    auto tag_and_val = p_data->message->at(5);
+    EXPECT_EQ(tag_and_val.tag.value()->field_num, 5);
+    EXPECT_EQ(tag_and_val.tag.value()->wire_type.value(), WireType::VARINT);
+    EXPECT_FALSE(tag_and_val.value.value()->sgroup);
+    EXPECT_FALSE(tag_and_val.value.value()->egroup);
+    ASSERT_FALSE(tag_and_val.value.value()->varint->isNull());
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_unsigned, 3);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_zigzag, -2);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment64, 3);
+    EXPECT_EQ(tag_and_val.value.value()->varint.value()->as_twos_compliment32, 3);
+    EXPECT_FALSE(tag_and_val.group.has_value());
+  }
 }
 
 } // anonymous namespace
